@@ -17,7 +17,8 @@ import numpy as np
 import pointfly as pf
 import tensorflow as tf
 from datetime import datetime
-
+from tqdm import tqdm
+import pdb
 
 def main():
     parser = argparse.ArgumentParser()
@@ -45,9 +46,9 @@ def main():
     if args.log != '-':
         sys.stdout = open(os.path.join(root_folder, args.log), 'w')
 
-    print('PID:', os.getpid())
+    #print('PID:', os.getpid())
 
-    print(args)
+    #print(args)
 
     model = importlib.import_module(args.model)
     setting_path = os.path.join(os.path.dirname(__file__), args.model)
@@ -67,7 +68,7 @@ def main():
     jitter_val = setting.jitter_val
 
     # Prepare inputs
-    print('{}-Preparing datasets...'.format(datetime.now()))
+    #print('{}-Preparing datasets...'.format(datetime.now()))
     is_list_of_h5_list = not data_utils.is_h5_list(args.filelist)
     if is_list_of_h5_list:
         seg_list = data_utils.load_seg_list(args.filelist)
@@ -80,17 +81,18 @@ def main():
     data_val, _, data_num_val, label_val, _ = data_utils.load_seg(args.filelist_val)
 
     # shuffle
+    # data_num_train is the number of points in each point cloud
     data_train, data_num_train, label_train = \
         data_utils.grouped_shuffle([data_train, data_num_train, label_train])
 
     num_train = data_train.shape[0]
     point_num = data_train.shape[1]
     num_val = data_val.shape[0]
-    print('{}-{:d}/{:d} training/validation samples.'.format(datetime.now(), num_train, num_val))
+    #print('{}-{:d}/{:d} training/validation samples.'.format(datetime.now(), num_train, num_val))
     batch_num = (num_train * num_epochs + batch_size - 1) // batch_size
-    print('{}-{:d} training batches.'.format(datetime.now(), batch_num))
+    #print('{}-{:d} training batches.'.format(datetime.now(), batch_num))
     batch_num_val = math.ceil(num_val / batch_size)
-    print('{}-{:d} testing batches per test.'.format(datetime.now(), batch_num_val))
+    #print('{}-{:d} testing batches per test.'.format(datetime.now(), batch_num_val))
 
     ######################################################################
     # Placeholders
@@ -132,7 +134,6 @@ def main():
 
     labels_sampled = tf.gather_nd(labels_seg, indices=indices, name='labels_sampled')
     labels_weights_sampled = tf.gather_nd(labels_weights, indices=indices, name='labels_weight_sampled')
-
     net = model.Net(points_augmented, features_augmented, is_training, setting)
     logits = net.logits
     probs = tf.nn.softmax(logits, name='probs')
@@ -211,9 +212,10 @@ def main():
                 print('{}-Checkpoint loaded from {} (Iter {})'.format(
                     datetime.now(), latest_ckpt, sess.run(global_step)))
 
-        for batch_idx_train in range(batch_num):
+        for batch_idx_train in tqdm(range(batch_num)):
             ######################################################################
             # Validation
+            
             if (batch_idx_train % step_val == 0 and (batch_idx_train != 0 or args.load_ckpt is not None)) \
                     or batch_idx_train == batch_num - 1:
                 filename_ckpt = os.path.join(folder_ckpt, 'iter')

@@ -294,15 +294,33 @@ def inverse_density_sampling(points, k, sample_num):
     indices = tf.concat([batch_indices, tf.expand_dims(point_indices, axis=2)], axis=2)
     return indices
 
+def cond_instance_normalization_plus(data, output, cond_scale, cond_shift, cond_alpha, labels, is_training, name, reuse=None):
+    means = tf.reduce_mean(data, axis=[1,2])
+    eps = 1e-5
+    m = tf.reduce_mean(means, axis=-1, keep_dims=True)
+    v = tf.math.reduce_std(means, axis=-1, keepdims=True)
+    means = (means-m) / (v + eps)
+    instance_mean, instance_sigma = tf.nn.moments(data, axes=[1,2], keep_dims=True)
+    h = (data - instance_mean) / tf.sqrt(instance_sigma + eps)
+    if name not in cond_scale:
+        cond_scale[name] = tf.get_variable(name + '_gamma', initializer=tf.random.normal(shape=[10, output], mean=1, stddev=0.02), dtype=tf.float32)
+        cond_shift[name] = tf.get_variable(name + '_beta', initializer=tf.zeros(shape=[10, output], dtype=tf.float32))
+        cond_alpha[name] = tf.get_variable(name + '_alpha', initializer=tf.random.normal(shape=[10, output], mean=1, stddev=0.02), dtype=tf.float32)
+    gamma = tf.nn.embedding_lookup(cond_scale[name], labels)
+    beta = tf.nn.embedding_lookup(cond_shift[name], labels)
+    alpha = tf.nn.embedding_lookup(cond_alpha[name], labels)
+    h = h + tf.expand_dims(tf.expand_dims(means, 1),1) * tf.expand_dims(tf.expand_dims(alpha, 1),1)
+    h = tf.expand_dims(tf.expand_dims(gamma, 1),1) * h + tf.expand_dims(tf.expand_dims(beta, 1),1)
+    return h
 
 def batch_normalization(data, is_training, name, reuse=None):
-    return tf.layers.batch_normalization(data, momentum=0.99, training=is_training,
+    return tf.layers.batch_normalization(data, momentum=0.99, training=is_training, center=False, scale=False,
                                          beta_regularizer=tf.contrib.layers.l2_regularizer(scale=1.0),
                                          gamma_regularizer=tf.contrib.layers.l2_regularizer(scale=1.0),
                                          reuse=reuse, name=name)
 
 
-def separable_conv2d(input, output, name, is_training, kernel_size, depth_multiplier=1,
+def separable_conv2d(input, output, name, labels, cond_scale, cond_shift, cond_alpha, is_training, kernel_size, depth_multiplier=1,
                      reuse=None, with_bn=True, activation=tf.nn.elu):
     conv2d = tf.layers.separable_conv2d(input, output, kernel_size=kernel_size, strides=(1, 1), padding='VALID',
                                         activation=activation,
@@ -312,10 +330,12 @@ def separable_conv2d(input, output, name, is_training, kernel_size, depth_multip
                                         depthwise_regularizer=tf.contrib.layers.l2_regularizer(scale=1.0),
                                         pointwise_regularizer=tf.contrib.layers.l2_regularizer(scale=1.0),
                                         reuse=reuse, name=name, use_bias=not with_bn)
-    return batch_normalization(conv2d, is_training, name + '_bn', reuse) if with_bn else conv2d
+    conv2d = cond_instance_normalization_plus(conv2d, output, cond_scale, cond_shift, cond_alpha, labels, is_training, name + '_cin', reuse)
+    #conv2d = batch_normalization(conv2d, is_training, name + '_bn', reuse)
+    return conv2d
 
 
-def depthwise_conv2d(input, depth_multiplier, name, is_training, kernel_size,
+def depthwise_conv2d(input, depth_multiplier, name, labels, cond_scale, cond_shift, cond_alpha, is_training, kernel_size,
                      reuse=None, with_bn=True, activation=tf.nn.elu):
     conv2d = tf.contrib.layers.separable_conv2d(input, num_outputs=None, kernel_size=kernel_size, padding='VALID',
                                                 activation_fn=activation,
@@ -326,17 +346,22 @@ def depthwise_conv2d(input, depth_multiplier, name, is_training, kernel_size,
                                                 biases_regularizer=None if with_bn else tf.contrib.layers.l2_regularizer(
                                                     scale=1.0),
                                                 reuse=reuse, scope=name)
-    return batch_normalization(conv2d, is_training, name + '_bn', reuse) if with_bn else conv2d
+    output = conv2d.get_shape().as_list()[-1]
+    conv2d = cond_instance_normalization_plus(conv2d, output, cond_scale, cond_shift, cond_alpha, labels, is_training, name + '_cin', reuse)
+    #conv2d = batch_normalization(conv2d, is_training, name + '_bn', reuse)
+    return conv2d
 
 
-def conv2d(input, output, name, is_training, kernel_size,
+def conv2d(input, output, name, labels, cond_scale, cond_shift, cond_alpha, is_training, kernel_size,
            reuse=None, with_bn=True, activation=tf.nn.elu):
     conv2d = tf.layers.conv2d(input, output, kernel_size=kernel_size, strides=(1, 1), padding='VALID',
                               activation=activation,
                               kernel_initializer=tf.glorot_normal_initializer(),
                               kernel_regularizer=tf.contrib.layers.l2_regularizer(scale=1.0),
                               reuse=reuse, name=name, use_bias=not with_bn)
-    return batch_normalization(conv2d, is_training, name + '_bn', reuse) if with_bn else conv2d
+    conv2d = cond_instance_normalization_plus(conv2d, output, cond_scale, cond_shift, cond_alpha, labels, is_training, name + '_cin', reuse)
+    #conv2d = batch_normalization(conv2d, is_training, name + '_bn', reuse)
+    return conv2d
 
 
 def dense(input, output, name, is_training, reuse=None, with_bn=True, activation=tf.nn.elu):

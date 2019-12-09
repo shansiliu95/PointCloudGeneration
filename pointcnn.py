@@ -6,8 +6,8 @@ import math
 import pointfly as pf
 import tensorflow as tf
 
-
-def xconv(pts, fts, qrs, tag, N, K, D, P, C, C_pts_fts, is_training, with_X_transformation, depth_multiplier,
+import pdb
+def xconv(pts, fts, qrs, tag, N, K, D, P, C, C_pts_fts, labels, cond_scale, cond_shift, cond_alpha, is_training, with_X_transformation, depth_multiplier,
           sorting_method=None, with_global=False):
     _, indices_dilated = pf.knn_indices_general(qrs, pts, K * D, True)
     indices = indices_dilated[:, :, ::D, :]
@@ -30,18 +30,17 @@ def xconv(pts, fts, qrs, tag, N, K, D, P, C, C_pts_fts, is_training, with_X_tran
 
     if with_X_transformation:
         ######################## X-transformation #########################
-        X_0 = pf.conv2d(nn_pts_local, K * K, tag + 'X_0', is_training, (1, K))
+        X_0 = pf.conv2d(nn_pts_local, K * K, tag + 'X_0', labels, cond_scale, cond_shift, cond_alpha, is_training, (1, K))
         X_0_KK = tf.reshape(X_0, (N, P, K, K), name=tag + 'X_0_KK')
-        X_1 = pf.depthwise_conv2d(X_0_KK, K, tag + 'X_1', is_training, (1, K))
+        X_1 = pf.depthwise_conv2d(X_0_KK, K, tag + 'X_1', labels, cond_scale, cond_shift, cond_alpha, is_training, (1, K))
         X_1_KK = tf.reshape(X_1, (N, P, K, K), name=tag + 'X_1_KK')
-        X_2 = pf.depthwise_conv2d(X_1_KK, K, tag + 'X_2', is_training, (1, K), activation=None)
+        X_2 = pf.depthwise_conv2d(X_1_KK, K, tag + 'X_2', labels, cond_scale, cond_shift, cond_alpha, is_training, (1, K), activation=None)
         X_2_KK = tf.reshape(X_2, (N, P, K, K), name=tag + 'X_2_KK')
         fts_X = tf.matmul(X_2_KK, nn_fts_input, name=tag + 'fts_X')
         ###################################################################
     else:
         fts_X = nn_fts_input
-
-    fts_conv = pf.separable_conv2d(fts_X, C, tag + 'fts_conv', is_training, (1, K), depth_multiplier=depth_multiplier)
+    fts_conv = pf.separable_conv2d(fts_X, C, tag + 'fts_conv', labels, cond_scale, cond_shift, cond_alpha, is_training, (1, K), depth_multiplier=depth_multiplier)
     fts_conv_3d = tf.squeeze(fts_conv, axis=2, name=tag + 'fts_conv_3d')
 
     if with_global:
@@ -53,13 +52,18 @@ def xconv(pts, fts, qrs, tag, N, K, D, P, C, C_pts_fts, is_training, with_X_tran
 
 
 class PointCNN:
-    def __init__(self, points, features, is_training, setting):
+    def __init__(self, points, features, labels, is_training, setting):
         xconv_params = setting.xconv_params
         fc_params = setting.fc_params
         with_X_transformation = setting.with_X_transformation
         sorting_method = setting.sorting_method
-        N = tf.shape(points)[0]
 
+        points = 2.0 * points - 1.0
+        
+        N = tf.shape(points)[0]
+        cond_scale = dict()
+        cond_shift = dict()
+        cond_alpha = dict()
         if setting.sampling == 'fps':
             from sampling import tf_sampling
 
@@ -112,7 +116,7 @@ class PointCNN:
                 C_pts_fts = C_prev // 4
                 depth_multiplier = math.ceil(C / C_prev)
             with_global = (setting.with_global and layer_idx == len(xconv_params) - 1)
-            fts_xconv = xconv(pts, fts, qrs, tag, N, K, D, P, C, C_pts_fts, is_training, with_X_transformation,
+            fts_xconv = xconv(pts, fts, qrs, tag, N, K, D, P, C, C_pts_fts, labels, cond_scale, cond_shift, cond_alpha, is_training, with_X_transformation,
                               depth_multiplier, sorting_method, with_global)
             fts_list = []
             for link in links:
@@ -143,7 +147,7 @@ class PointCNN:
                 C_prev = xconv_params[pts_layer_idx]['C']
                 C_pts_fts = C_prev // 4
                 depth_multiplier = 1
-                fts_xdconv = xconv(pts, fts, qrs, tag, N, K, D, P, C, C_pts_fts, is_training, with_X_transformation,
+                fts_xdconv = xconv(pts, fts, qrs, tag, N, K, D, P, C, C_pts_fts, labels, cond_scale, cond_shift, cond_alpha, is_training, with_X_transformation,
                                    depth_multiplier, sorting_method)
                 fts_concat = tf.concat([fts_xdconv, fts_qrs], axis=-1, name=tag + 'fts_concat')
                 fts_fuse = pf.dense(fts_concat, C, tag + 'fts_fuse', is_training)
