@@ -1,5 +1,9 @@
 # Point Clouds Generation via Score Matching
 
+The codes are heavily borrowed from https://github.com/yangyanli/PointCNN.
+
+I 
+
 Train:
 
 python ./train_val_generation.py -t ../data/shapenet_partseg/train_val_files.txt -v ../data/shapenet_partseg/test_files.txt -s ../models/generation/ -m pointcnn_seg -x shapenet_generation
