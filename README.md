@@ -1,8 +1,8 @@
 # Point Clouds Generation via Score Matching
 
-The codes are heavily borrowed from https://github.com/yangyanli/PointCNN.
+The codes are heavily borrowed from https://github.com/yangyanli/PointCNN. Please refer to this link for how to prepare the ShapeNet segmentation dataset.
 
-I 
+I add 723 lines and remove 247 lines of codes. Modifications are mainly made in langevin_dynamics.py, train_val_generation.py and pointcnn.py.
 
 Train:
 
